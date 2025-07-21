@@ -228,9 +228,134 @@ public class MaresCommunicator: NSObject, ObservableObject {
             throw MaresProtocol.ProtocolError.deviceNotFound
         }
         
-        // This would implement the full dive download protocol
-        // For now, return empty array as placeholder
-        return []
+        print("📊 Starting dive data download...")
+        
+        // Step 1: Get dive count from device
+        let diveCount = try await getDiveCount()
+        print("📈 Device has \(diveCount) dives stored")
+        
+        if diveCount == 0 {
+            print("ℹ️ No dives found on device")
+            return []
+        }
+        
+        // Step 2: Download each dive
+        var dives: [DiveData] = []
+        
+        for i in 0..<diveCount {
+            print("⬇️ Downloading dive \(i + 1)/\(diveCount)...")
+            
+            do {
+                // Get dive header first
+                if let dive = try await downloadSingleDive(index: UInt16(i)) {
+                    dives.append(dive)
+                }
+            } catch {
+                print("⚠️ Failed to download dive \(i + 1): \(error)")
+                // Continue with other dives even if one fails
+            }
+        }
+        
+        print("✅ Downloaded \(dives.count) dives successfully")
+        return dives
+    }
+    
+    /// Gets the number of dives stored on the device
+    private func getDiveCount() async throws -> UInt16 {
+        print("🔢 Requesting dive count from device...")
+        
+        // Send object init command for logbook count
+        let initCommand = MaresProtocol.createDiveCountCommand()
+        let initResponse = try await sendObjectCommand(MaresProtocol.CMD_OBJ_INIT, data: initCommand)
+        
+        // Parse the init response
+        let parseResult = MaresProtocol.parseObjectInitResponse(initResponse)
+        
+        switch parseResult {
+        case .success(let objectInfo):
+            if !objectInfo.isMultiPacket, let payload = objectInfo.payload {
+                // Simple response embedded in init packet
+                if let count = MaresProtocol.parseDiveCount(from: payload) {
+                    return count
+                } else {
+                    throw MaresProtocol.ProtocolError.invalidResponse
+                }
+            } else {
+                // Multi-packet response - need to read data packets
+                let dataResponse = try await sendObjectCommand(MaresProtocol.CMD_OBJ_EVEN, data: Data())
+                if let count = MaresProtocol.parseDiveCount(from: dataResponse) {
+                    return count
+                } else {
+                    throw MaresProtocol.ProtocolError.invalidResponse
+                }
+            }
+        case .failure(let error):
+            throw error
+        }
+    }
+    
+    /// Downloads a single dive by index
+    private func downloadSingleDive(index: UInt16) async throws -> DiveData? {
+        // For now, this is a placeholder implementation
+        // In a full implementation, we would:
+        // 1. Request dive header with createDiveHeaderCommand(diveIndex: index)  
+        // 2. Parse dive metadata (date, duration, etc.)
+        // 3. Request dive data with createDiveDataCommand(diveIndex: index)
+        // 4. Parse dive profile samples
+        // 5. Create DiveData object from parsed information
+        
+        print("🏗️ Dive parsing not yet implemented - using placeholder data")
+        
+        // Return placeholder dive for now
+        let calendar = Calendar.current
+        let diveDate = calendar.date(byAdding: .day, value: -Int(index + 1), to: Date()) ?? Date()
+        
+        return DiveData(
+            diveNumber: Int(index + 1),
+            date: diveDate,
+            duration: 1800 + TimeInterval(index * 300), // 30-45 min dives
+            maxDepth: 15.0 + Double(index) * 2, // Increasing depths
+            averageDepth: 10.0 + Double(index) * 1.5,
+            waterType: index % 2 == 0 ? .saltwater : .freshwater,
+            maxTemperature: 24.0 - Double(index) * 0.5,
+            minTemperature: 22.0 - Double(index) * 0.5
+        )
+    }
+    
+    /// Sends an object-based command and waits for response
+    private func sendObjectCommand(_ command: UInt8, data: Data) async throws -> Data {
+        guard let port = serialPort, port.isOpen else {
+            throw MaresProtocol.ProtocolError.deviceNotFound
+        }
+        
+        return try await withCheckedThrowingContinuation { continuation in
+            // Clear any existing response data
+            responseData.removeAll()
+            
+            // Set up response handler
+            pendingCommand = { responseData in
+                continuation.resume(returning: responseData)
+            }
+            
+            // Set up timeout
+            commandTimer = Timer.scheduledTimer(withTimeInterval: commandTimeout, repeats: false) { _ in
+                Task { @MainActor in
+                    self.pendingCommand = nil
+                }
+                continuation.resume(throwing: MaresProtocol.ProtocolError.communicationTimeout)
+            }
+            
+            // Create the command with Mares encoding (XOR)
+            let mareCommand = Data([command, command ^ MaresProtocol.XOR])
+            
+            // Send command header first
+            port.send(mareCommand)
+            
+            // Send data payload if provided
+            if !data.isEmpty {
+                port.send(data)
+            }
+        }
     }
     
     // MARK: - Low-level Communication

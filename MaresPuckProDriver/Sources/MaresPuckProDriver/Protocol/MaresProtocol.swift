@@ -18,6 +18,31 @@ public struct MaresProtocol {
     /// Version command - requests device version info
     static let CMD_VERSION: UInt8 = 0xC2
     
+    // MARK: - Object-based Protocol Commands (for newer devices like Puck Pro)
+    
+    /// Object initialization command
+    static let CMD_OBJ_INIT: UInt8 = 0xBF
+    
+    /// Object data reading commands (even/odd packets)
+    static let CMD_OBJ_EVEN: UInt8 = 0xAC
+    static let CMD_OBJ_ODD: UInt8 = 0xFE
+    
+    // MARK: - Object Types and Subindices
+    
+    /// Device object type
+    static let OBJ_DEVICE: UInt16 = 0x2000
+    static let OBJ_DEVICE_MODEL: UInt8 = 0x02
+    static let OBJ_DEVICE_SERIAL: UInt8 = 0x04
+    
+    /// Logbook object type
+    static let OBJ_LOGBOOK: UInt16 = 0x2008
+    static let OBJ_LOGBOOK_COUNT: UInt8 = 0x01
+    
+    /// Dive object type
+    static let OBJ_DIVE: UInt16 = 0x3000
+    static let OBJ_DIVE_HEADER: UInt8 = 0x02
+    static let OBJ_DIVE_DATA: UInt8 = 0x03
+    
     /// Flash size command - requests memory size info  
     static let CMD_FLASHSIZE: UInt8 = 0xB3
     
@@ -86,6 +111,46 @@ public struct MaresProtocol {
         return createCommand(CMD_VERSION)
     }
     
+    /// Creates an object initialization command
+    /// - Parameters:
+    ///   - objectType: The object type (e.g., OBJ_LOGBOOK, OBJ_DIVE)
+    ///   - subIndex: The sub-index within the object
+    /// - Returns: Data containing the object init command
+    static func createObjectInitCommand(objectType: UInt16, subIndex: UInt8) -> Data {
+        var command = Data(capacity: 16)
+        command.append(0x40)  // Fixed init byte
+        command.append(UInt8(objectType & 0xFF))        // Object type low byte
+        command.append(UInt8((objectType >> 8) & 0xFF)) // Object type high byte  
+        command.append(subIndex)                         // Sub-index
+        
+        // Pad to 16 bytes with zeros (as per libdivecomputer)
+        while command.count < 16 {
+            command.append(0x00)
+        }
+        
+        return command
+    }
+    
+    /// Creates a dive count request command
+    /// - Returns: Data containing the dive count command
+    static func createDiveCountCommand() -> Data {
+        return createObjectInitCommand(objectType: OBJ_LOGBOOK, subIndex: OBJ_LOGBOOK_COUNT)
+    }
+    
+    /// Creates a dive header request command
+    /// - Parameter diveIndex: Index of the dive (0-based)
+    /// - Returns: Data containing the dive header command
+    static func createDiveHeaderCommand(diveIndex: UInt16) -> Data {
+        return createObjectInitCommand(objectType: OBJ_DIVE + diveIndex, subIndex: OBJ_DIVE_HEADER)
+    }
+    
+    /// Creates a dive data request command
+    /// - Parameter diveIndex: Index of the dive (0-based)
+    /// - Returns: Data containing the dive data command
+    static func createDiveDataCommand(diveIndex: UInt16) -> Data {
+        return createObjectInitCommand(objectType: OBJ_DIVE + diveIndex, subIndex: OBJ_DIVE_DATA)
+    }
+    
     // MARK: - Response Parsing
     
     /// Parses a Mares protocol response
@@ -110,6 +175,63 @@ public struct MaresProtocol {
         // Extract payload (remove ACK and END)
         let payload = data.dropFirst().dropLast()
         return .success(Data(payload))
+    }
+    
+    /// Parses object initialization response
+    /// - Parameter data: Raw response data from object init command
+    /// - Returns: Object info (size, type, etc.) or error
+    static func parseObjectInitResponse(_ data: Data) -> Result<ObjectInfo, ProtocolError> {
+        guard data.count >= 16 else {
+            return .failure(.invalidResponse)
+        }
+        
+        let responseType = data[0]
+        let objectType = UInt16(data[1]) | (UInt16(data[2]) << 8)
+        let subIndex = data[3]
+        
+        if responseType == 0x41 {
+            // Large payload split into multiple packets
+            // Size is in bytes 4-7
+            let size = UInt32(data[4]) | 
+                      (UInt32(data[5]) << 8) | 
+                      (UInt32(data[6]) << 16) | 
+                      (UInt32(data[7]) << 24)
+            return .success(ObjectInfo(type: objectType, subIndex: subIndex, size: size, isMultiPacket: true))
+        } else if responseType == 0x42 {
+            // Small payload embedded in response
+            let payloadSize = data.count - 4  // Skip header bytes
+            let payload = data.dropFirst(4)
+            return .success(ObjectInfo(type: objectType, subIndex: subIndex, size: UInt32(payloadSize), isMultiPacket: false, payload: payload))
+        } else {
+            return .failure(.unexpectedHeader(responseType))
+        }
+    }
+    
+    /// Object information from init response
+    public struct ObjectInfo {
+        public let type: UInt16
+        public let subIndex: UInt8
+        public let size: UInt32
+        public let isMultiPacket: Bool
+        public let payload: Data?
+        
+        public init(type: UInt16, subIndex: UInt8, size: UInt32, isMultiPacket: Bool, payload: Data? = nil) {
+            self.type = type
+            self.subIndex = subIndex
+            self.size = size
+            self.isMultiPacket = isMultiPacket
+            self.payload = payload
+        }
+    }
+    
+    /// Parses dive count from logbook response
+    /// - Parameter data: Logbook count payload
+    /// - Returns: Number of dives stored on device
+    static func parseDiveCount(from data: Data) -> UInt16? {
+        guard data.count >= 2 else { return nil }
+        
+        // Dive count is stored as little-endian 16-bit value
+        return UInt16(data[0]) | (UInt16(data[1]) << 8)
     }
     
     // MARK: - Version Info Parsing
