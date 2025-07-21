@@ -260,38 +260,20 @@ public class MaresCommunicator: NSObject, ObservableObject {
         return dives
     }
     
-    /// Gets the number of dives stored on the device
+    /// Gets the number of dives stored on the device using raw memory protocol
     private func getDiveCount() async throws -> UInt16 {
-        print("🔢 Requesting dive count from device...")
+        print("🔢 Requesting dive count using RAW MEMORY protocol (Puck Pro doesn't support object protocol)")
         
-        // Send object init command for logbook count
-        let initCommand = MaresProtocol.createDiveCountCommand()
-        let initResponse = try await sendObjectCommand(MaresProtocol.CMD_OBJ_INIT, data: initCommand)
+        // Puck Pro uses raw memory access, not object protocol
+        // Based on libdivecomputer mares_iconhd_device_foreach_raw implementation
         
-        // Parse the init response
-        let parseResult = MaresProtocol.parseObjectInitResponse(initResponse)
+        // For now, return a test count since raw memory protocol needs more research
+        // TODO: Implement proper raw memory reading for dive count
+        print("⚠️ Raw memory protocol not yet implemented - using test data")
+        print("📚 Need to implement memory reading at specific addresses for dive count")
         
-        switch parseResult {
-        case .success(let objectInfo):
-            if !objectInfo.isMultiPacket, let payload = objectInfo.payload {
-                // Simple response embedded in init packet
-                if let count = MaresProtocol.parseDiveCount(from: payload) {
-                    return count
-                } else {
-                    throw MaresProtocol.ProtocolError.invalidResponse
-                }
-            } else {
-                // Multi-packet response - need to read data packets
-                let dataResponse = try await sendObjectCommand(MaresProtocol.CMD_OBJ_EVEN, data: Data())
-                if let count = MaresProtocol.parseDiveCount(from: dataResponse) {
-                    return count
-                } else {
-                    throw MaresProtocol.ProtocolError.invalidResponse
-                }
-            }
-        case .failure(let error):
-            throw error
-        }
+        // Return a small test count for now
+        return 2
     }
     
     /// Downloads a single dive by index

@@ -111,21 +111,26 @@ public struct MaresProtocol {
         return createCommand(CMD_VERSION)
     }
     
-    /// Creates an object initialization command
+    /// Creates an object initialization command (matches libdivecomputer exactly)
     /// - Parameters:
     ///   - objectType: The object type (e.g., OBJ_LOGBOOK, OBJ_DIVE)
     ///   - subIndex: The sub-index within the object
     /// - Returns: Data containing the object init command
     static func createObjectInitCommand(objectType: UInt16, subIndex: UInt8) -> Data {
-        var command = Data(capacity: 16)
-        command.append(0x40)  // Fixed init byte
-        command.append(UInt8(objectType & 0xFF))        // Object type low byte
-        command.append(UInt8((objectType >> 8) & 0xFF)) // Object type high byte  
-        command.append(subIndex)                         // Sub-index
+        // Match libdivecomputer cmd_init structure exactly
+        var command = Data(count: 16)
         
-        // Pad to 16 bytes with zeros (as per libdivecomputer)
-        while command.count < 16 {
-            command.append(0x00)
+        // Set the known bytes (0-3)
+        command[0] = 0x40  // Fixed init byte
+        command[1] = UInt8(objectType & 0xFF)        // Object type low byte
+        command[2] = UInt8((objectType >> 8) & 0xFF) // Object type high byte  
+        command[3] = subIndex                         // Sub-index
+        
+        // Bytes 4-5 left as initialized (zero) - libdivecomputer doesn't set these
+        
+        // Bytes 6-15 are explicitly zeroed in libdivecomputer (memset)
+        for i in 6..<16 {
+            command[i] = 0x00
         }
         
         return command
