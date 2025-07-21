@@ -1,0 +1,59 @@
+# macOS
+.DS_Store
+
+# Xcode/Swift build artifacts
+.build/
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.user
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+.Python
+
+# Python virtual environments
+venv/
+env/
+ENV/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Testing files
+device_test.swift
+connection_test.swift
+test_with_framework.swift
+
+# IDE files
+.vscode/
+*.swp
+*.swo
+
+# libdivecomputer build artifacts
+libdivecomputer/build/
+libdivecomputer/Makefile
+libdivecomputer/config.h
+libdivecomputer/config.log
+libdivecomputer/config.status
+libdivecomputer/libtool
+libdivecomputer/autom4te.cache/
+libdivecomputer/include/libdivecomputer/version.h
+libdivecomputer/**/*.o
+libdivecomputer/**/*.a
+libdivecomputer/**/*.la
+libdivecomputer/**/*.lo
