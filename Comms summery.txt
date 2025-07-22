@@ -1,0 +1,41 @@
+Communication Protocol Analysis:
+
+Initial Setup:
+•  Line 11: INFO: Write: size=2, data=C267 - Initial handshake command
+•  Line 12: INFO: Read: size=1, data=AA - Acknowledgment from Puck Pro
+•  Line 13: Device info response (140 bytes) containing "Puck Pro" identifier
+
+Data Exchange Pattern:
+1. Write command (2 or 8 bytes) 
+2. Read acknowledgment (AA)
+3. Write data request (8 bytes with memory address)
+4. Read data block (256 bytes typically)  
+5. Read end marker (EA)
+
+Key Commands Logged:
+•  C267 - Initial handshake
+•  E742 - Data request command
+•  0C00000004000000 - Read device info
+•  C812010000010000 - Read memory block at address 0x0112C8
+
+Memory Reading:
+The dive computer memory is read in 256-byte blocks sequentially:
+•  Each block starts with E742 command
+•  Memory addresses increment: C812, C811, C810, etc.
+•  Data contains dive profiles, timestamps, depth readings
+
+Serial Communication Settings:
+•  Baud rate: 115200
+•  Data bits: 8  
+•  Parity: Even (2)
+•  Stop bits: 1 (0)
+•  Flow control: None (0)
+•  Timeout: 3000ms
+
+This detailed logging is extremely valuable for:
+•  Debugging communication issues
+•  Understanding the protocol  
+•  Developing custom dive computer software
+•  Analyzing data transfer patterns
+
+You now have a complete log of every byte sent to and received from your Mares Puck Pro dive computer! This could be useful for reverse engineering the protocol or troubleshooting communication problems.

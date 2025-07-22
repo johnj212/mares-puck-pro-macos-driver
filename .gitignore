@@ -57,3 +57,12 @@ libdivecomputer/**/*.o
 libdivecomputer/**/*.a
 libdivecomputer/**/*.la
 libdivecomputer/**/*.lo
+
+# Communication logs and debugging files
+*.log
+com5_communication.log
+"Comms summery.txt"
+
+# Protocol test files
+mares_with_rts.py
+simple_test.swift

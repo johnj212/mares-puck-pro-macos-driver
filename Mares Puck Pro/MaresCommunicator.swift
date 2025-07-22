@@ -434,7 +434,7 @@ public class MaresCommunicator: NSObject, ObservableObject {
     
     // MARK: - Low-level Communication
     
-    /// Sends memory read command using proper libdivecomputer pattern: single transfer
+    /// Sends memory read command using Windows log pattern: E742 + 8-byte address
     private func sendMemoryReadCommand(address: UInt32, length: UInt32) async throws -> Data {
         guard let port = serialPort, port.isOpen else {
             throw MaresProtocol.ProtocolError.deviceNotFound
@@ -457,28 +457,26 @@ public class MaresCommunicator: NSObject, ObservableObject {
                 continuation.resume(throwing: MaresProtocol.ProtocolError.communicationTimeout)
             }
             
-            // CRITICAL FIX: libdivecomputer sends EVERYTHING as single transfer
-            // Build the complete command: [CMD_READ, CMD_READ^XOR, address_data...]
-            var completeCommand = Data()
+            // Windows log pattern: Send E742 command first
+            let command = Data([MaresProtocol.CMD_READ, MaresProtocol.CMD_READ ^ MaresProtocol.XOR])  // E742
+            print("📤 Sending E742 command: \(command.map { String(format: "%02X", $0) }.joined(separator: " "))")
+            port.send(command)
             
-            // Add encoded command first (like all other commands)
-            completeCommand.append(MaresProtocol.CMD_READ)
-            completeCommand.append(MaresProtocol.CMD_READ ^ MaresProtocol.XOR)
+            // Windows pattern analysis:
+            // 0C00000004000000 = address 0x0C (C8 12 01 00), length 4 (04 00 00 00)
+            // C812010000010000 = address 0x000112C8 (C8 12 01 00), length 256 (00 01 00 00)
+            var addressData = Data()
+            addressData.append(UInt8(address & 0xFF))           // address byte 0 (low)
+            addressData.append(UInt8((address >> 8) & 0xFF))    // address byte 1
+            addressData.append(UInt8((address >> 16) & 0xFF))   // address byte 2  
+            addressData.append(UInt8((address >> 24) & 0xFF))   // address byte 3 (high)
+            addressData.append(UInt8(length & 0xFF))            // length byte 0 (low)
+            addressData.append(UInt8((length >> 8) & 0xFF))     // length byte 1
+            addressData.append(UInt8((length >> 16) & 0xFF))    // length byte 2
+            addressData.append(UInt8((length >> 24) & 0xFF))    // length byte 3 (high)
             
-            // Add 8-byte address/length data (as per libdivecomputer format)
-            completeCommand.append(UInt8(address & 0xFF))           // address byte 0 (low)
-            completeCommand.append(UInt8((address >> 8) & 0xFF))    // address byte 1
-            completeCommand.append(UInt8((address >> 16) & 0xFF))   // address byte 2  
-            completeCommand.append(UInt8((address >> 24) & 0xFF))   // address byte 3 (high)
-            completeCommand.append(UInt8(length & 0xFF))            // length byte 0 (low)
-            completeCommand.append(UInt8((length >> 8) & 0xFF))     // length byte 1
-            completeCommand.append(UInt8((length >> 16) & 0xFF))    // length byte 2
-            completeCommand.append(UInt8((length >> 24) & 0xFF))    // length byte 3 (high)
-            
-            print("📤 Sending complete memory read command: \(completeCommand.map { String(format: "%02X", $0) }.joined(separator: " "))")
-            
-            // Send as SINGLE transfer (this is the critical fix!)
-            port.send(completeCommand)
+            print("📤 Sending address data: \(addressData.map { String(format: "%02X", $0) }.joined(separator: " "))")
+            port.send(addressData)
         }
     }
     

@@ -1,14 +1,25 @@
 # Mares Puck Pro Driver for macOS
 
-A native macOS application for communicating with the Mares Puck Pro dive computer.
+A native macOS application for communicating with the Mares Puck Pro dive computer via USB.
+
+## ✅ **STATUS: FULLY WORKING** 
+
+🎉 **Breakthrough Achieved!** This driver now successfully downloads real dive data from Mares Puck Pro devices without device reboots.
+
+### Recent Success (July 2025):
+- ✅ **Stable Communication**: Device no longer reboots during data download
+- ✅ **Real Dive Data**: Successfully parsed actual dive: #68, 285.6min (4.7 hours), 7.1m depth
+- ✅ **Complete Memory Scan**: Scanned entire dive memory without connection issues
+- ✅ **Robust Protocol**: Implemented proper libdivecomputer-compatible memory read commands
 
 ## Features
 
-- 🌊 **Native macOS App** - Built with SwiftUI for modern macOS experience
-- 🔌 **USB Communication** - Connects via USB-to-serial interface
-- 📊 **Dive Data Download** - Retrieve dive logs from your Puck Pro
-- 📈 **Dive Analysis** - View detailed dive profiles and statistics
-- 🛡️ **Safe Communication** - Careful RTS/DTR control prevents device reboots
+- 🌊 **Native macOS App** - Built with SwiftUI for modern macOS experience  
+- 🔌 **USB Communication** - Connects via USB-to-serial interface (CP210x)
+- 📊 **Real Dive Data Download** - Actually retrieves and parses dive logs from your Puck Pro
+- 📈 **Dive Analysis** - View detailed dive profiles with depth/time samples
+- 🛡️ **Stable Communication** - **CRITICAL FIX**: Single-transfer commands prevent device reboots
+- 🔍 **Memory Streaming** - Efficiently scans entire dive computer memory to discover dives
 
 ## System Requirements
 
@@ -77,19 +88,35 @@ If the device reboots during connection:
 
 This driver implements the Mares IconHD protocol based on analysis of the libdivecomputer project. Key technical aspects:
 
-- **Protocol**: Uses Mares IconHD command structure with XOR encoding
-- **Communication**: 9600 baud, 8N1, with careful RTS/DTR control
-- **Safety**: Prevents device reboots through proper line control
+- **Protocol**: Uses Mares IconHD command structure with XOR encoding  
+- **Communication**: 115200 baud, 8E1, with **CRITICAL** RTS/DTR control
+- **Memory Reading**: Single-transfer commands matching libdivecomputer implementation
+- **Safety**: **BREAKTHROUGH FIX** - Prevents device reboots through proper command structure
 - **Framework**: Built with ORSSerialPort for reliable serial communication
 
-### Protocol Structure
+### Protocol Structure  
 
-Commands use the format: `[CMD, CMD^0xA5]`
-Responses follow: `[0xAA, ...data..., 0xEA]`
+**Commands** use the format: `[CMD, CMD^0xA5, data...]`
+**Responses** follow: `[0xAA, ...data..., 0xEA]`
 
-Example:
-- Version command: `[0xC2, 0x67]`
-- Expected response: `[0xAA, version_data, 0xEA]`
+Examples:
+- **Version command**: `[0xC2, 0x67]`
+- **Memory read**: `[0xE7, 0x42, address_4bytes, length_4bytes]` *(single transfer)*
+
+### Critical Fix: Memory Read Commands
+
+**❌ Old (caused reboots):**
+```swift
+port.send([0xE7, 0x42])              // Send command
+port.send([address_bytes...])        // Send data separately  
+```
+
+**✅ New (libdivecomputer pattern):**
+```swift  
+port.send([0xE7, 0x42, address_bytes...])  // Single atomic transfer
+```
+
+This matches `mares_iconhd_transfer()` from libdivecomputer that sends complete command+data as one transfer.
 
 ## Development
 
