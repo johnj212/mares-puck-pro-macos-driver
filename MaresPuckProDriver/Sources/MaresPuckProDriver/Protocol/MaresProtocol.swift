@@ -111,6 +111,31 @@ public struct MaresProtocol {
         return createCommand(CMD_VERSION)
     }
     
+    /// Creates a memory read command (E742 pattern from libdivecomputer log)
+    /// - Parameters:
+    ///   - address: Memory address to read from (32-bit)
+    ///   - length: Number of bytes to read (32-bit)
+    /// - Returns: Memory read command as Data
+    static func createMemoryReadCommand(address: UInt32, length: UInt32 = 256) -> Data {
+        // Based on log analysis: E742 + 8 bytes
+        // Format: [addr_low, addr_mid, addr_high, 0x01, 0x00, length_low, length_mid, length_high]
+        var command = Data()
+        command.append(CMD_READ)
+        command.append(CMD_READ ^ XOR)  // E742 -> E7, 42
+        
+        // 8-byte memory address/length structure from log
+        command.append(UInt8(address & 0xFF))         // address low byte
+        command.append(UInt8((address >> 8) & 0xFF))  // address mid byte  
+        command.append(UInt8((address >> 16) & 0xFF)) // address high byte
+        command.append(0x01)                          // fixed byte from log
+        command.append(0x00)                          // fixed byte from log
+        command.append(UInt8(length & 0xFF))          // length low byte
+        command.append(UInt8((length >> 8) & 0xFF))   // length mid byte
+        command.append(UInt8((length >> 16) & 0xFF))  // length high byte
+        
+        return command
+    }
+    
     /// Creates an object initialization command (matches libdivecomputer exactly)
     /// - Parameters:
     ///   - objectType: The object type (e.g., OBJ_LOGBOOK, OBJ_DIVE)
@@ -136,8 +161,9 @@ public struct MaresProtocol {
         return command
     }
     
-    /// Creates a dive count request command
-    /// - Returns: Data containing the dive count command
+    /// Creates a dive count request command using object protocol
+    /// Based on libdivecomputer analysis: OBJ_LOGBOOK + OBJ_LOGBOOK_COUNT
+    /// - Returns: Data containing the dive count object init command  
     static func createDiveCountCommand() -> Data {
         return createObjectInitCommand(objectType: OBJ_LOGBOOK, subIndex: OBJ_LOGBOOK_COUNT)
     }
@@ -229,14 +255,53 @@ public struct MaresProtocol {
         }
     }
     
-    /// Parses dive count from logbook response
-    /// - Parameter data: Logbook count payload
+    /// Parses dive count from object response data
+    /// - Parameter data: Object payload containing dive count (2 bytes, little-endian)
     /// - Returns: Number of dives stored on device
     static func parseDiveCount(from data: Data) -> UInt16? {
         guard data.count >= 2 else { return nil }
         
-        // Dive count is stored as little-endian 16-bit value
-        return UInt16(data[0]) | (UInt16(data[1]) << 8)
+        // From libdivecomputer: dive count is 16-bit little-endian (array_uint16_le)
+        let count = UInt16(data[0]) | (UInt16(data[1]) << 8)
+        
+        return count
+    }
+    
+    /// Parses dive count from memory read response (Puck Pro)
+    /// - Parameter data: Memory payload containing dive count (4 bytes)
+    /// - Returns: Number of dives stored on device
+    static func parseDiveCountFromMemory(from data: Data) -> UInt16? {
+        guard data.count >= 4 else { return nil }
+        
+        // From Windows log: memory reads return 4-byte values
+        // Try to interpret as 32-bit little-endian and extract reasonable count
+        let count32 = UInt32(data[0]) | 
+                     (UInt32(data[1]) << 8) | 
+                     (UInt32(data[2]) << 16) | 
+                     (UInt32(data[3]) << 24)
+        
+        // Windows log shows values like C8130100 at 0x0130
+        // This might be encoded differently - try various interpretations
+        
+        // Try lower 16 bits
+        let count16 = UInt16(count32 & 0xFFFF)
+        if count16 > 0 && count16 < 1000 {
+            return count16
+        }
+        
+        // Try upper 16 bits
+        let count16_upper = UInt16((count32 >> 16) & 0xFFFF)
+        if count16_upper > 0 && count16_upper < 1000 {
+            return count16_upper
+        }
+        
+        // Try byte-swapped interpretation
+        let swapped = UInt16(data[2]) | (UInt16(data[3]) << 8)
+        if swapped > 0 && swapped < 1000 {
+            return swapped
+        }
+        
+        return nil  // Could not parse reasonable dive count
     }
     
     // MARK: - Version Info Parsing
@@ -253,23 +318,34 @@ public struct MaresProtocol {
         }
     }
     
-    /// Parses version response data into DeviceInfo
-    /// - Parameter versionData: Version payload from device
-    /// - Returns: DeviceInfo structure
+    /// Parses device information from version response
+    /// Based on libdivecomputer log analysis: device info is in the 140-byte response
+    /// - Parameter versionData: Version payload from device (140 bytes from log)
+    /// - Returns: DeviceInfo structure or nil if parsing fails
     static func parseDeviceInfo(from versionData: Data) -> DeviceInfo? {
-        guard versionData.count >= 8 else { return nil }
+        guard versionData.count >= 140 else { 
+            print("⚠️ Version data too short: \(versionData.count) bytes, expected 140")
+            return nil 
+        }
         
-        // Extract model (this might need adjustment based on actual response format)
-        let modelByte = versionData[0]
-        let model = DeviceModel(rawValue: modelByte) ?? .puckPro
+        // From log analysis: "Puck Pro" appears at offset 64 in the response
+        // Extract device name (look for "Puck Pro" string)
+        let deviceNameRange = 64..<74  // "Puck Pro" + null padding
+        let deviceNameData = versionData.subdata(in: deviceNameRange)
+        let _ = String(data: deviceNameData, encoding: .ascii)?.trimmingCharacters(in: .controlCharacters) ?? "Unknown"
         
-        // Extract firmware version (format may need adjustment)
-        let firmware = String(format: "%d.%d", versionData[1], versionData[2])
+        // Extract firmware version (appears around offset 80-90 based on log)
+        let firmwareRange = 80..<90
+        let firmwareData = versionData.subdata(in: firmwareRange)  
+        let firmware = String(data: firmwareData, encoding: .ascii)?.trimmingCharacters(in: .controlCharacters) ?? "Unknown"
         
-        // Extract serial number (format may need adjustment)
-        let serialBytes = versionData.suffix(4)
-        let serialNumber = serialBytes.reduce(0) { ($0 << 8) + UInt32($1) }
-        let serial = String(serialNumber)
+        // Extract serial number (appears at end of response)
+        let serialRange = 100..<120
+        let serialData = versionData.subdata(in: serialRange)
+        let serial = String(data: serialData, encoding: .ascii)?.trimmingCharacters(in: .controlCharacters) ?? "Unknown"
+        
+        // Model is Puck Pro (0x18) based on device detection
+        let model = DeviceModel.puckPro
         
         return DeviceInfo(
             model: model,
