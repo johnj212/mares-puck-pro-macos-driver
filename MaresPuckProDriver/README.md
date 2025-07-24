@@ -1,6 +1,6 @@
-# Mares Puck Pro Driver for macOS
+# DRAFT - Mares Puck Pro Driver for macOS
 
-A native macOS application for communicating with the Mares Puck Pro dive computer.
+A native macOS application for communicating with the Mares Puck Pro dive computer. Working progress....
 
 ## Features
 
